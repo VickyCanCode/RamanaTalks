@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Menu, Send, Volume2, Square, Copy as CopyIcon, Mic, MicOff, PlusCircle, ArrowDown, Loader2 } from 'lucide-react';
 import { createConversation, saveMessage, submitFeedback, listMessages, updateConversationTitle, existsConversation } from '../data/conversations';
 import { speak, stopSpeak, setTtsLoadingListener } from './tts';
-import Sidebar from './Sidebar';
+import Sidebar from './sidebar';
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string; id?: string; lang?: string };
 
