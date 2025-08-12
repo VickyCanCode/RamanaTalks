@@ -5,9 +5,11 @@ export const config = { path: '/api/chat-supabase' };
 const SIMILARITY_THRESHOLD = 0.65;
 const MAX_CHUNKS = 25;
 const MAX_CANDIDATE_CHUNKS = 75;
+const RERANK_LAMBDA = 0.7; // trade-off between relevance and diversity for MMR
 const RATE_LIMIT_WINDOW_MS = 15_000; // 15s window
 const RATE_LIMIT_MAX = 5; // 5 requests per window per IP
 const rateLimiter = new Map(); // ip -> { windowStart, count }
+const semanticCache = new Map(); // key -> { response, sourceAttribution, followUpQuestions, topicsDiscussed }
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
@@ -146,7 +148,9 @@ async function searchSupabaseChunks(embedding, userContext = null) {
         if (hasPref) adjusted *= 1.2;
       }
     }
-    return { ...chunk, similarity: adjusted, hasIncident };
+    // Preserve raw similarity if present for reranker; many RPCs return similarity as a column
+    const rawSim = typeof chunk.similarity === 'number' ? chunk.similarity : (typeof chunk.score === 'number' ? chunk.score : 0.0);
+    return { ...chunk, similarity: adjusted, hasIncident, rawSim };
   });
   const top = processed.sort((a,b)=>b.similarity-a.similarity).slice(0, MAX_CANDIDATE_CHUNKS);
   const diverse = [];
@@ -189,6 +193,71 @@ async function searchSupabaseChunks(embedding, userContext = null) {
     if (!diverse.find((r)=>r.id===c.id)) diverse.push(c);
   }
   return diverse;
+}
+
+function tokenize(text) {
+  try { return String(text || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean); } catch { return []; }
+}
+
+function mmrRerank(query, items, k = MAX_CHUNKS, lambda = RERANK_LAMBDA) {
+  // Minimal MMR using token overlap as diversity and rawSim as relevance
+  const qTokens = new Set(tokenize(query));
+  const remaining = items.slice();
+  const selected = [];
+  while (selected.length < Math.min(k, remaining.length)) {
+    let bestIdx = 0;
+    let bestScore = -Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const it = remaining[i];
+      const rel = (typeof it.rawSim === 'number' ? it.rawSim : 0.0) + 0.001 * (it.similarity || 0);
+      let divPenalty = 0;
+      const itTokens = new Set(tokenize(it.content));
+      for (const s of selected) {
+        const sTokens = new Set(tokenize(s.content));
+        // approximate overlap ratio
+        let overlap = 0;
+        for (const t of itTokens) if (sTokens.has(t)) overlap++;
+        const denom = Math.max(1, itTokens.size + sTokens.size - overlap);
+        const jaccard = overlap / denom;
+        if (jaccard > divPenalty) divPenalty = jaccard;
+      }
+      const score = lambda * rel - (1 - lambda) * divPenalty;
+      if (score > bestScore) { bestScore = score; bestIdx = i; }
+    }
+    selected.push(remaining.splice(bestIdx, 1)[0]);
+  }
+  return selected;
+}
+
+function expandQueryTerms(q) {
+  const lower = (q || '').toLowerCase();
+  const expansions = [];
+  const dict = [
+    ['who am i', 'nan yar', 'self inquiry', 'atma vichara'],
+    ['arunachala', 'mount arunachala', 'tiruvannamalai'],
+    ['surrender', 'prapatti', 'bhakti'],
+    ['grace', 'kripa'],
+    ['meditation', 'dhyana']
+  ];
+  for (const group of dict) {
+    if (group.some(t => lower.includes(t))) expansions.push(...group);
+  }
+  return Array.from(new Set(expansions));
+}
+
+async function historyAwareRewrite(message, history, langShort) {
+  try {
+    if (!googleApiKey) return message;
+    const recent = (history || []).slice(-2).map(m => `${m.role}: ${m.content}`).join('\n');
+    const prompt = `Rewrite the user's latest question so it is fully self-contained, preserving meaning, and concise.\nRecent context:\n${recent}\nQuestion: ${message}\nRewritten:`;
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${googleApiKey}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] })
+    });
+    if (!resp.ok) return message;
+    const data = await resp.json();
+    const out = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    return out || message;
+  } catch { return message; }
 }
 
 function buildContext(relevantChunks){
@@ -339,10 +408,27 @@ export async function handler(event) {
     if (!message) return json(400, { error: 'Message is required' });
     let detectedLanguageCode = languageCode && languageCode !== 'auto' ? languageCode : await detectLanguage(message);
     const normalizedLang = normalizeLangCode(detectedLanguageCode);
+
+    // Semantic cache key
+    const cacheKey = `${normalizedLang}::${message.trim().toLowerCase()}`;
+    if (semanticCache.has(cacheKey)) {
+      const c = semanticCache.get(cacheKey);
+      return json(200, {
+        response: c.response,
+        conversationId: conversationId || `conv_${Date.now()}`,
+        followUpQuestions: c.followUpQuestions,
+        sourceAttribution: c.sourceAttribution,
+        topicsDiscussed: c.topicsDiscussed,
+        detectedLanguage: normalizedLang,
+        searchStats: { fromCache: true }
+      });
+    }
     let relevantChunks = [];
     let questionEmbedding = null;
     try {
-      const queryForEmbedding = await maybeTranslateToEnglish(message, normalizedLang);
+      // History-aware rewrite and translation for embedding
+      const rewritten = await historyAwareRewrite(message, messageHistory, normalizedLang);
+      const queryForEmbedding = await maybeTranslateToEnglish(rewritten, normalizedLang);
       questionEmbedding = await generateEmbedding(queryForEmbedding);
       relevantChunks = await searchSupabaseChunks(questionEmbedding, userContext);
     } catch {
@@ -373,11 +459,15 @@ export async function handler(event) {
         relevantChunks = [];
       }
     }
-    const { context, sourceAttribution } = buildContext(relevantChunks);
+    // Rerank + diversity (MMR) and dynamic similarity guardrail
+    const minSim = Math.max(0.35, SIMILARITY_THRESHOLD - 0.2);
+    const filtered = (relevantChunks || []).filter((c) => (c.rawSim || c.similarity || 0) >= minSim);
+    const reranked = mmrRerank(message, filtered.length ? filtered : (relevantChunks || []), MAX_CHUNKS, RERANK_LAMBDA);
+    const { context, sourceAttribution } = buildContext(reranked);
     const response = await generateGeminiResponse(message, context, messageHistory, userContext, normalizedLang);
     const followUpQuestions = generateFollowUpQuestions(message, relevantChunks);
     const topicsDiscussed = extractTopics(message, relevantChunks);
-    return json(200, {
+    const payload = {
       response,
       conversationId: conversationId || `conv_${Date.now()}`,
       followUpQuestions,
@@ -386,12 +476,14 @@ export async function handler(event) {
       detectedLanguage: normalizedLang,
       searchStats: {
         totalChunksSearched: 'ALL chunks in Supabase',
-        candidatesRetrieved: relevantChunks.length,
-        chunksSelected: relevantChunks.length,
+        candidatesRetrieved: (relevantChunks || []).length,
+        chunksSelected: (reranked || []).length,
         searchMethod: questionEmbedding ? 'embedding' : 'text_search',
         embeddingSuccess: !!questionEmbedding
       }
-    });
+    };
+    try { semanticCache.set(cacheKey, payload); } catch {}
+    return json(200, payload);
   } catch (error) {
     return json(500, { error: 'Internal server error', details: error?.message || String(error) });
   }
