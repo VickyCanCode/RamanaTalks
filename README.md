@@ -85,6 +85,14 @@ If cloning or pushing:
 - STT failing on Safari: falls back to browser SpeechRecognition
 - TTS errors: ensure API key; server logs show details
 
+## Advanced quality controls
+- Cross-encoder reranker (optional): set `COHERE_API_KEY` to enable high-quality reranking. Falls back to MMR if not set.
+- Windowed inclusion: adjacent passages are pulled per source to improve quote continuity.
+- Personalization: pass `userContext` with `spiritualLevel`, `preferredTopics`, `preferredStyle` to bias retrieval.
+- Streaming (experimental): add `?stream=1` to `/api/chat-supabase` for SSE streaming; UI consumption pending.
+- Semantic cache: memoizes per-language answers; consider invalidation after KB updates.
+- Offline eval (manual): create a CSV of question→expected quotes; compare retrieval logs and iterate thresholds/expansions.
+
 ---
 
 © RamanaTalks

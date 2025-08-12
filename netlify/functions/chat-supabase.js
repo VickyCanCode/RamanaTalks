@@ -16,6 +16,7 @@ const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 const googleApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.VITE_GEMINI_API_KEY;
+const cohereApiKey = process.env.COHERE_API_KEY || null;
 
 function json(statusCode, body) {
   const headers = {
@@ -125,12 +126,19 @@ async function searchSupabaseChunks(embedding, userContext = null) {
   });
   if (error) throw error;
   let filteredResults = results || [];
+  // Personalization bias tuning
   if (userContext && filteredResults.length > 0) {
     const level = userContext.spiritualLevel || 1;
     if (level <= 3) filteredResults = filteredResults.filter((c) => (c.importance || 3) <= 4);
     else if (level >= 7) filteredResults = filteredResults.filter((c) => (c.importance || 3) >= 3);
     if (userContext.preferredTopics?.length) {
       filteredResults = filteredResults.filter((c) => c.tags && c.tags.some((t) => userContext.preferredTopics.includes(t)));
+    }
+    // Gentle boost for preferred style (dialogue vs doctrine) if provided
+    if (userContext.preferredStyle) {
+      const style = String(userContext.preferredStyle).toLowerCase();
+      const styleBoost = (c) => (c.category || '').toLowerCase().includes('dialogue') && style.includes('gentle') ? 1.1 : 1.0;
+      filteredResults = filteredResults.map((c) => ({ ...c, similarity: (c.similarity || 0) * styleBoost(c) }));
     }
   }
   const processed = filteredResults.map((chunk) => {
@@ -258,6 +266,58 @@ async function historyAwareRewrite(message, history, langShort) {
     const out = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     return out || message;
   } catch { return message; }
+}
+
+async function crossEncoderRerank(query, items, langShort) {
+  try {
+    if (!cohereApiKey) return null;
+    const model = (langShort === 'en') ? 'rerank-english-v3.0' : 'rerank-multilingual-v3.0';
+    const docs = items.map((it) => it.content || '');
+    const resp = await fetch('https://api.cohere.ai/v1/rerank', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${cohereApiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, query, documents: docs, top_n: Math.min(items.length, MAX_CHUNKS), return_documents: false })
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const order = (data?.results || []).map((r) => ({ index: r.index, score: r.relevance_score }));
+    if (!order.length) return null;
+    const reordered = order.map(({ index }) => items[index]).filter(Boolean);
+    return reordered;
+  } catch {
+    return null;
+  }
+}
+
+async function includeNeighborsFor(supabase, selected) {
+  try {
+    if (!supabase) return selected;
+    const augmented = [...selected];
+    const bySource = new Map();
+    for (const s of selected) {
+      const src = s.source || null;
+      if (!src) continue;
+      if (!bySource.has(src)) bySource.set(src, []);
+      bySource.get(src).push(s);
+    }
+    for (const [src, arr] of bySource.entries()) {
+      const seed = String(arr[0]?.content || '').slice(0, 180);
+      if (!seed) continue;
+      const { data: neigh } = await supabase
+        .from('knowledge_base')
+        .select('*')
+        .eq('source', src)
+        .textSearch('content', seed, { type: 'websearch', config: 'english' })
+        .limit(5);
+      if (Array.isArray(neigh) && neigh.length) {
+        const known = new Set(augmented.map((x) => x.id));
+        for (const n of neigh) if (!known.has(n.id)) augmented.push(n);
+      }
+    }
+    return augmented;
+  } catch {
+    return selected;
+  }
 }
 
 function buildContext(relevantChunks){
@@ -479,8 +539,13 @@ export async function handler(event) {
     }
     // Rerank + diversity (MMR) and dynamic similarity guardrail
     const minSim = Math.max(0.35, SIMILARITY_THRESHOLD - 0.2);
-    const filtered = (relevantChunks || []).filter((c) => (c.rawSim || c.similarity || 0) >= minSim);
-    const reranked = mmrRerank(message, filtered.length ? filtered : (relevantChunks || []), MAX_CHUNKS, RERANK_LAMBDA);
+    let filtered = (relevantChunks || []).filter((c) => (c.rawSim || c.similarity || 0) >= minSim);
+    if (filtered.length === 0) filtered = relevantChunks || [];
+    // Cross-encoder rerank if available; else MMR
+    let reranked = await crossEncoderRerank(message, filtered, normalizedLang);
+    if (!Array.isArray(reranked) || reranked.length === 0) reranked = mmrRerank(message, filtered, MAX_CHUNKS, RERANK_LAMBDA);
+    // Windowed inclusion (neighbors) to preserve quote continuity
+    reranked = await includeNeighborsFor(supabase, reranked).then((arr)=>arr.slice(0, MAX_CHUNKS));
     const { context, sourceAttribution } = buildContext(reranked);
     // Insufficient context branch
     if ((reranked || []).length === 0) {
