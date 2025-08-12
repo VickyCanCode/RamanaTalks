@@ -86,7 +86,7 @@ export default async function handler(event) {
     const payload = {
       input: { text },
       voice: selectedVoiceName ? { name: selectedVoiceName } : { languageCode: effLanguage, ssmlGender: 'MALE' },
-      audioConfig: { audioEncoding: 'MP3', speakingRate: styleConfig.speakingRate, pitch: styleConfig.p i tch, volumeGainDb: styleConfig.volumeGainDb },
+      audioConfig: { audioEncoding: 'MP3', speakingRate: styleConfig.speakingRate, pitch: styleConfig.pitch, volumeGainDb: styleConfig.volumeGainDb },
     };
     // Try service-account synthesize first if available
     if (useServiceAcct) {
