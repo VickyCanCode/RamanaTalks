@@ -567,15 +567,7 @@ export async function handler(event) {
       const greeting = normalizedLang === 'en' ? `Dear ${userName},\n\n` : `${userName} గారూ,\n\n`;
       response = greeting + response;
     }
-    // Do NOT add inline citations/quotes at top. Append sources section at end instead.
-    const langLabel = (code) => {
-      const map = { en: 'Sources', te: 'మూలాలు', hi: 'स्रोत', ta: 'ஆதாரங்கள்', ml: 'മൂലങ്ങൾ', kn: 'ಮೂಲಗಳು', bn: 'উৎস', gu: 'સ્ત્રોતો', mr: 'स्रोत', pa: 'ਸਰੋਤ', or: 'ମୂଳ' };
-      return map[code] || 'Sources';
-    };
-    const uniqueSources = Array.from(new Set((sourceAttribution || []).map((s) => String(s.source || '').trim()).filter(Boolean)));
-    if (uniqueSources.length) {
-      response = `${response}\n\n${langLabel(normalizedLang)}:\n- ${uniqueSources.slice(0,6).join('\n- ')}`;
-    }
+    // Do NOT add sources in-text. UI shows sources separately.
     // Post-process: avoid question restatement at the top
     try {
       const q = message.trim();
