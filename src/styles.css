@@ -8,6 +8,10 @@
   --primary: #2e7d32;
   --primary-cta: #154a28;
   --accent: #2d4ea3;
+  /* sticky offsets (desktop) */
+  --sticky-1: 100px;
+  --sticky-2: 152px;
+  --sticky-banner: 80px;
 }
 
 *{ box-sizing: border-box; }
@@ -24,6 +28,7 @@ body{
 
 button{
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 /* Utility */
@@ -75,6 +80,11 @@ input, textarea{
   html, body, #root { height: 100%; min-height: 100%; }
   body { padding-bottom: env(safe-area-inset-bottom); }
   .btn { padding: 10px 12px; }
+  :root{
+    --sticky-1: 64px;
+    --sticky-2: 96px;
+    --sticky-banner: 64px;
+  }
 }
 
 /* Help sticky footers stay above iOS keyboard */

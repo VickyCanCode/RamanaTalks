@@ -506,7 +506,7 @@ export default function Satsang(): JSX.Element {
                 borderRadius: 10,
                 textAlign: 'center',
                 position: 'sticky',
-                top: 80,
+                top: 'var(--sticky-banner)',
                 zIndex: 6,
               }}>
                 This Satsang has ended. Joining and chat are disabled.
@@ -514,7 +514,7 @@ export default function Satsang(): JSX.Element {
             )}
 
             {/* Primary audio controls + back to list */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', position:'sticky', top: 100, zIndex: 5 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', position:'sticky', top: 'var(--sticky-1)', zIndex: 5 }}>
               <button onClick={() => { try { location.hash = '#satsang'; } catch {} setActiveRoom(null); }} style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid #333', background: '#0e0e0e', color: '#ddd', fontWeight: 600 }}>← Back</button>
               {!audioReady ? (
                 <button onClick={() => void (!ended && joinAudio())} disabled={ended} style={{ padding: '10px 14px', borderRadius: 10, border: ended ? '1px solid #444' : '1px solid #2e7d32', background: ended ? '#222' : '#154a28', color: ended ? '#777' : '#d7ffd9', fontWeight: 600 }}>
@@ -537,7 +537,7 @@ export default function Satsang(): JSX.Element {
               </div>
             </div>
             {/* Room header */}
-            <div style={{ textAlign:'center', marginTop: 8, position:'sticky', top: 152, zIndex: 4, background:'rgba(10,10,10,0.45)', backdropFilter:'blur(4px)', padding:'6px 0' }}>
+            <div style={{ textAlign:'center', marginTop: 8, position:'sticky', top: 'var(--sticky-2)', zIndex: 4, background:'rgba(10,10,10,0.45)', backdropFilter:'blur(4px)', padding:'6px 0' }}>
               <div style={{ display:'flex', justifyContent:'center', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                 <div style={{ fontSize: 18, fontWeight: 800 }}>
                   {rooms.find(r=>r.id===activeRoom)?.title || rooms.find(r=>r.id===activeRoom)?.name}
