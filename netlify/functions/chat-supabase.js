@@ -380,6 +380,8 @@ export async function handler(event) {
   if (method === 'OPTIONS') return json(200, {});
   if (method !== 'POST') return json(405, { error: 'Method Not Allowed' });
   try {
+    const url = new URL(event?.url || event?.rawUrl || 'http://local');
+    const doStream = url.searchParams.get('stream') === '1';
     // Simple in-memory rate limit by IP (best-effort in single instance)
     const ip = event?.headers?.['x-forwarded-for']?.split(',')[0]?.trim() || event?.headers?.['client-ip'] || 'unknown';
     const now = Date.now();
@@ -404,7 +406,7 @@ export async function handler(event) {
     } catch {
       bodyObj = {};
     }
-    const { message, conversationId, messageHistory = [], userId = null, userContext = null, languageCode = 'en' } = bodyObj;
+    const { message, conversationId, messageHistory = [], userId = null, userContext = null, languageCode = 'en', userName = null } = bodyObj;
     if (!message) return json(400, { error: 'Message is required' });
     let detectedLanguageCode = languageCode && languageCode !== 'auto' ? languageCode : await detectLanguage(message);
     const normalizedLang = normalizeLangCode(detectedLanguageCode);
@@ -493,7 +495,23 @@ export async function handler(event) {
         searchStats: { candidatesRetrieved: (relevantChunks||[]).length, chunksSelected: 0 }
       });
     }
-    const response = await generateGeminiResponse(message, context, messageHistory, userContext, normalizedLang);
+    let response = await generateGeminiResponse(message, context, messageHistory, userContext, normalizedLang);
+    // Personalization: greet the seeker by name once
+    if (userName && typeof userName === 'string' && userName.trim().length > 0) {
+      const greeting = normalizedLang === 'en' ? `Dear ${userName},\n\n` : `${userName} గారూ,\n\n`;
+      response = greeting + response;
+    }
+    // Enforce 1-2 short quotes with source at top
+    try {
+      const snippets = (reranked || []).slice(0, 2).map((c) => {
+        const txt = String(c.content || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+        const src = String(c.source || 'source');
+        return `“${txt}” — ${src}`;
+      });
+      if (snippets.length) {
+        response = snippets.join('\n') + '\n\n' + response;
+      }
+    } catch {}
     const followUpQuestions = generateFollowUpQuestions(message, relevantChunks);
     const topicsDiscussed = extractTopics(message, relevantChunks);
     const payload = {
@@ -512,6 +530,28 @@ export async function handler(event) {
       }
     };
     try { semanticCache.set(cacheKey, payload); } catch {}
+    if (doStream) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          function send(obj) { controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`)); }
+          // Simulated incremental streaming of the response
+          const text = String(response);
+          let i = 0;
+          const step = Math.max(24, Math.floor(text.length / 100));
+          while (i < text.length) {
+            const chunk = text.slice(i, i + step);
+            send({ type: 'chunk', content: chunk });
+            i += step;
+            await new Promise((r) => setTimeout(r, 10));
+          }
+          // send sources at end
+          send({ type: 'end', sources: sourceAttribution });
+          controller.close();
+        }
+      });
+      return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' } });
+    }
     return json(200, payload);
   } catch (error) {
     return json(500, { error: 'Internal server error', details: error?.message || String(error) });

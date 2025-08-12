@@ -104,7 +104,7 @@ export default function App(): JSX.Element {
       const res = await fetch(apiBase, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, messageHistory: historyToSend, conversationId: convId || undefined, languageCode: selectedLang !== 'auto' ? selectedLang : undefined })
+        body: JSON.stringify({ message: content, messageHistory: historyToSend, conversationId: convId || undefined, languageCode: selectedLang !== 'auto' ? selectedLang : undefined, userName: displayName })
       });
       const data = await res.json();
       const reply = (data?.response as string) ?? 'No response';
