@@ -33,9 +33,17 @@ export default function App(): JSX.Element {
   const [showJump, setShowJump] = useState<boolean>(false);
   const typingTimerRef = React.useRef<number | null>(null);
   const [isTyping, setIsTyping] = useState<boolean>(false);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
 
   const apiBase = useMemo(() => {
     return '/api/chat-supabase';
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => { try { setIsMobile(window.innerWidth <= 768); } catch { setIsMobile(false); } };
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   useEffect(() => {
@@ -331,7 +339,7 @@ export default function App(): JSX.Element {
           </div>
         )}
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', position: 'relative', paddingBottom: 140, backgroundImage: 'linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55)), url(/aesthetic-background-with-gradient-neon-led-light-effect.jpg)', backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed', WebkitOverflowScrolling: 'touch' }} onScroll={(e) => {
+          <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', position: 'relative', paddingBottom: isMobile ? 170 : 140, backgroundImage: 'linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55)), url(/aesthetic-background-with-gradient-neon-led-light-effect.jpg)', backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed', WebkitOverflowScrolling: 'touch' }} onScroll={(e) => {
             const el = e.currentTarget as HTMLDivElement;
             const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
             atBottomRef.current = nearBottom;
@@ -418,7 +426,7 @@ export default function App(): JSX.Element {
             ))}
           </div>
         )}
-        <div style={{ display: 'flex', gap: 8, maxWidth: 720, width: '100%', margin: '0 auto', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, maxWidth: 720, width: '100%', margin: '0 auto', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -427,10 +435,10 @@ export default function App(): JSX.Element {
             aria-label="Ask your question"
             disabled={loading}
             inputMode="text"
-            style={{ flex: 1, padding: '12px 14px', background: '#1b1b1b', color: '#eee', border: '1px solid #333' }}
+            style={{ flex: isMobile ? '0 0 100%' : '1 1 auto', padding: isMobile ? '14px 16px' : '12px 14px', background: '#1b1b1b', color: '#eee', border: '1px solid #333', minWidth: 0 }}
           />
-          <div style={{ position:'relative' }}>
-          <select aria-label="Language" value={selectedLang} onChange={(e) => { const v = e.target.value; setSelectedLang(v); setShowLangNudge(false); try { localStorage.setItem('chat_lang', v); } catch {} }} className="btn" style={{ padding: '10px 12px', boxShadow: showLangNudge ? '0 0 0 2px #ffd27a, 0 0 18px #ffb84d' : undefined }}>
+          <div style={{ position:'relative', flex: isMobile ? '1 1 auto' : '0 0 auto' }}>
+          <select aria-label="Language" value={selectedLang} onChange={(e) => { const v = e.target.value; setSelectedLang(v); setShowLangNudge(false); try { localStorage.setItem('chat_lang', v); } catch {} }} className="btn" style={{ padding: isMobile ? '10px 10px' : '10px 12px', boxShadow: showLangNudge ? '0 0 0 2px #ffd27a, 0 0 18px #ffb84d' : undefined, maxWidth: isMobile ? 180 : undefined }}>
             <option value="auto">Auto</option>
             <option value="en-IN">English</option>
             <option value="hi-IN">Hindi</option>
@@ -462,7 +470,7 @@ export default function App(): JSX.Element {
           )}
           </div>
           <button onClick={toggleListening} className="btn" aria-pressed={listening} aria-label="Voice input" title="Voice input" style={listening ? { boxShadow: '0 0 14px #5fd18a' } : undefined}>{listening ? <Mic size={16} /> : <MicOff size={16} />}</button>
-          <button onClick={() => void sendMessage()} disabled={loading} className="btn btn-primary" aria-label="Send"><Send size={16} /></button>
+          <button onClick={() => void sendMessage()} disabled={loading} className="btn btn-primary" aria-label="Send" style={isMobile ? { flex: '1 1 auto' } : undefined}><Send size={16} /></button>
         </div>
       </footer>
     </div>
