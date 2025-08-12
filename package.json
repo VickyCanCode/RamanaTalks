@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "netlify:serve": "npx -y netlify-cli dev --port 8888"
+    "netlify:serve": "npx -y netlify-cli dev --port 8888",
+    "eval:retrieval": "node --experimental-fetch scripts/eval_retrieval.ts cases.json"
   },
   "dependencies": {
     "@google-cloud/text-to-speech": "^6.2.0",

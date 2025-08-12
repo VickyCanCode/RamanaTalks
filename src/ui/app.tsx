@@ -34,6 +34,7 @@ export default function App(): JSX.Element {
   const typingTimerRef = React.useRef<number | null>(null);
   const [isTyping, setIsTyping] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [streamOn, setStreamOn] = useState<boolean>(() => localStorage.getItem('chat_stream') !== 'false');
 
   const apiBase = useMemo(() => {
     return '/api/chat-supabase';
@@ -101,45 +102,94 @@ export default function App(): JSX.Element {
         }
       }
 
-      const res = await fetch(apiBase, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, messageHistory: historyToSend, conversationId: convId || undefined, languageCode: selectedLang !== 'auto' ? selectedLang : undefined, userName: displayName })
-      });
-      const data = await res.json();
-      const reply = (data?.response as string) ?? 'No response';
-      const detected = (data?.detectedLanguage as string) || 'en-IN';
-      setLastLang(detected);
-      const follow = (data?.followUpQuestions as string[]) || [];
-      setSuggested(follow);
-      const sources = (data?.sourceAttribution as any[]) || [];
-      // Typing animation for assistant reply; save to DB after complete
-      setIsTyping(true);
-      await new Promise<void>((resolve) => {
-        setMessages((prev) => [...prev, { role: 'assistant', content: '', lang: (selectedLang !== 'auto' ? selectedLang : detected), sources }]);
-        const step = Math.max(2, Math.floor(reply.length / 240));
-        let i = 0;
-        const tick = () => {
-          i = Math.min(reply.length, i + step);
-          setMessages((prev) => {
-            const copy = [...prev];
-            const lastIdx = copy.length - 1;
-            if (lastIdx >= 0) copy[lastIdx] = { ...copy[lastIdx], content: reply.slice(0, i) };
-            return copy;
-          });
-          if (atBottomRef.current && scrollRef.current) {
-            scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight });
+      if (streamOn) {
+        const res = await fetch(`${apiBase}?stream=1`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: content, messageHistory: historyToSend, conversationId: convId || undefined, languageCode: selectedLang !== 'auto' ? selectedLang : undefined, userName: displayName })
+        });
+        // Start assistant message
+        setMessages((prev) => [...prev, { role: 'assistant', content: '', lang: (selectedLang !== 'auto' ? selectedLang : lastLang), sources: [] }]);
+        const reader = res.body?.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        if (reader) {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const parts = buf.split('\n\n');
+            buf = parts.pop() || '';
+            for (const evt of parts) {
+              const line = evt.split('\n').find((l) => l.startsWith('data:')) || '';
+              const payloadStr = line.replace('data:', '').trim();
+              if (!payloadStr) continue;
+              try {
+                const obj = JSON.parse(payloadStr);
+                if (obj.type === 'chunk' && typeof obj.content === 'string') {
+                  setMessages((prev) => {
+                    const copy = [...prev];
+                    const idx = copy.length - 1;
+                    if (idx >= 0 && copy[idx].role === 'assistant') {
+                      copy[idx] = { ...copy[idx], content: (copy[idx].content || '') + obj.content } as any;
+                    }
+                    return copy;
+                  });
+                } else if (obj.type === 'end' && Array.isArray(obj.sources)) {
+                  setMessages((prev) => {
+                    const copy = [...prev];
+                    const idx = copy.length - 1;
+                    if (idx >= 0 && copy[idx].role === 'assistant') {
+                      copy[idx] = { ...copy[idx], sources: obj.sources } as any;
+                    }
+                    return copy;
+                  });
+                }
+              } catch {}
+            }
           }
-          if (i < reply.length) {
-            typingTimerRef.current = window.setTimeout(tick, 16);
-          } else {
-            typingTimerRef.current = null;
-            setIsTyping(false);
-            resolve();
-          }
-        };
-        tick();
-      });
+        }
+      } else {
+        const res = await fetch(apiBase, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: content, messageHistory: historyToSend, conversationId: convId || undefined, languageCode: selectedLang !== 'auto' ? selectedLang : undefined, userName: displayName })
+        });
+        const data = await res.json();
+        const reply = (data?.response as string) ?? 'No response';
+        const detected = (data?.detectedLanguage as string) || 'en-IN';
+        setLastLang(detected);
+        const follow = (data?.followUpQuestions as string[]) || [];
+        setSuggested(follow);
+        const sources = (data?.sourceAttribution as any[]) || [];
+        // Typing animation for assistant reply; save to DB after complete
+        setIsTyping(true);
+        await new Promise<void>((resolve) => {
+          setMessages((prev) => [...prev, { role: 'assistant', content: '', lang: (selectedLang !== 'auto' ? selectedLang : detected), sources }]);
+          const step = Math.max(2, Math.floor(reply.length / 240));
+          let i = 0;
+          const tick = () => {
+            i = Math.min(reply.length, i + step);
+            setMessages((prev) => {
+              const copy = [...prev];
+              const lastIdx = copy.length - 1;
+              if (lastIdx >= 0) copy[lastIdx] = { ...copy[lastIdx], content: reply.slice(0, i) };
+              return copy;
+            });
+            if (atBottomRef.current && scrollRef.current) {
+              scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight });
+            }
+            if (i < reply.length) {
+              typingTimerRef.current = window.setTimeout(tick, 16);
+            } else {
+              typingTimerRef.current = null;
+              setIsTyping(false);
+              resolve();
+            }
+          };
+          tick();
+        });
+      }
       if (persist && convId) {
          const savedId = await saveMessage(convId, 'assistant', reply);
         if (savedId) {
@@ -482,6 +532,9 @@ export default function App(): JSX.Element {
           </div>
           <button onClick={toggleListening} className="btn" aria-pressed={listening} aria-label="Voice input" title="Voice input" style={listening ? { boxShadow: '0 0 14px #5fd18a' } : undefined}>{listening ? <Mic size={16} /> : <MicOff size={16} />}</button>
           <button onClick={() => void sendMessage()} disabled={loading} className="btn btn-primary" aria-label="Send" style={isMobile ? { flex: '1 1 auto' } : undefined}><Send size={16} /></button>
+          <label style={{ fontSize: 12, opacity: 0.85, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={streamOn} onChange={(e) => { setStreamOn(e.target.checked); try { localStorage.setItem('chat_stream', e.target.checked ? 'true' : 'false'); } catch {} }} /> Stream
+          </label>
         </div>
       </footer>
     </div>
