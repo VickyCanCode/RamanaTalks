@@ -21,6 +21,7 @@ export default async function handler(event) {
     // accept both languageCode and language; voiceName and voice
     const language = body?.languageCode || body?.language || 'en-US';
     const requestedVoiceName = body?.voiceName || body?.voice || null;
+    const style = (body?.style || body?.profile || 'grandpa_male').toString().toLowerCase();
     if (!text) return json(400, { error: 'Missing text' });
     const useServiceAcct = !!(process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_PROJECT_ID);
     
@@ -55,20 +56,37 @@ export default async function handler(event) {
         const vData = await vResp.json();
         voices = Array.isArray(vData?.voices) ? vData.voices : [];
       }
-      const byPreference = (nameFrag) => voices.filter((v) => (v?.name || '').includes(nameFrag));
-      const male = (arr) => arr.filter((v) => (v?.ssmlGender || v?.ssmlGender === 'MALE' || (v?.ssmlGender || '').includes?.('MALE')));
-      let candidates = male(byPreference('Neural2'));
-      if (!candidates.length) candidates = male(byPreference('Wavenet'));
-      if (!candidates.length) candidates = male(voices);
-      if (!candidates.length) candidates = voices;
-      selectedVoiceName = candidates?.[0]?.name || null;
+      const maleOnly = voices.filter((v) => String(v?.ssmlGender || '').toUpperCase() === 'MALE');
+      const isNeural2 = (v) => String(v?.name || '').includes('Neural2');
+      const isWavenet = (v) => String(v?.name || '').includes('Wavenet');
+      const depthRank = (v) => {
+        const name = String(v?.name || '').toUpperCase();
+        // Prefer deeper-sounding letters often mapped to lower timbre variants
+        const letter = name.split('-').pop() || '';
+        const order = ['D','E','C','B','A'];
+        const idx = order.indexOf(letter.charAt(0));
+        return idx >= 0 ? (10 - idx) : 0;
+      };
+      let pool = maleOnly.length ? maleOnly : voices;
+      pool = pool.sort((a,b)=>{
+        const aScore = (isNeural2(a)?4:0) + (isWavenet(a)?2:0) + depthRank(a);
+        const bScore = (isNeural2(b)?4:0) + (isWavenet(b)?2:0) + depthRank(b);
+        return bScore - aScore;
+      });
+      selectedVoiceName = pool?.[0]?.name || null;
       if (selectedVoiceName) voiceCache.set(effLanguage, selectedVoiceName);
     }
+
+    // Style tuning
+    const styleConfig = (() => {
+      if (style.includes('grandpa')) return { speakingRate: 0.85, pitch: -6.0, volumeGainDb: 0.0 };
+      return { speakingRate: 1.0, pitch: 0.0, volumeGainDb: 0.0 };
+    })();
 
     const payload = {
       input: { text },
       voice: selectedVoiceName ? { name: selectedVoiceName } : { languageCode: effLanguage, ssmlGender: 'MALE' },
-      audioConfig: { audioEncoding: 'MP3', speakingRate: 0.9, pitch: -4.0 },
+      audioConfig: { audioEncoding: 'MP3', speakingRate: styleConfig.speakingRate, pitch: styleConfig.p i tch, volumeGainDb: styleConfig.volumeGainDb },
     };
     // Try service-account synthesize first if available
     if (useServiceAcct) {
@@ -101,7 +119,7 @@ export default async function handler(event) {
       const payloadLangOnly = {
         input: { text },
         voice: { languageCode: effLanguage, ssmlGender: 'MALE' },
-        audioConfig: { audioEncoding: 'MP3', speakingRate: 0.9, pitch: -4.0 },
+        audioConfig: { audioEncoding: 'MP3', speakingRate: styleConfig.speakingRate, pitch: styleConfig.pitch, volumeGainDb: styleConfig.volumeGainDb },
       };
       const resp2 = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadLangOnly)
@@ -115,7 +133,7 @@ export default async function handler(event) {
         const payloadFallback = {
           input: { text },
           voice: { languageCode: loc, ssmlGender: 'MALE' },
-          audioConfig: { audioEncoding: 'MP3', speakingRate: 0.9, pitch: -4.0 },
+          audioConfig: { audioEncoding: 'MP3', speakingRate: styleConfig.speakingRate, pitch: styleConfig.pitch, volumeGainDb: styleConfig.volumeGainDb },
         };
         const rf = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadFallback)
