@@ -1,3 +1,4 @@
+# Large files via LFS
 public/*.wav filter=lfs diff=lfs merge=lfs -text
 knowledge-base-enhanced.json filter=lfs diff=lfs merge=lfs -text
 public/knowledge-base-enhanced.json filter=lfs diff=lfs merge=lfs -text
