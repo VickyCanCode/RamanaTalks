@@ -313,7 +313,7 @@ export default function App(): JSX.Element {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <header style={{ position: 'sticky', top: 120, zIndex: 150, padding: '16px', borderBottom: '1px solid #1b1b1b', background: 'rgba(10,10,10,0.9)', backdropFilter: 'blur(6px)' }}>
+      <header style={{ position: 'sticky', top: 'var(--sticky-1)', zIndex: 150, padding: '16px', borderBottom: '1px solid #1b1b1b', background: 'rgba(10,10,10,0.9)', backdropFilter: 'blur(6px)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button className="btn" onClick={() => setSidebarOpen((v) => !v)} aria-label="Toggle list"><Menu size={18} /></button>

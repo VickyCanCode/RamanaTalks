@@ -33,11 +33,31 @@ export default function Satsang(): JSX.Element {
   const [paneMode, setPaneMode] = useState<'chat' | 'recordings'>(() => {
     try { return (localStorage.getItem('satsang_pane') as 'chat'|'recordings') || 'chat'; } catch { return 'chat'; }
   });
+  const [isMobile, setIsMobile] = useState<boolean>(false);
   // Recording refs/state
   const mixStreamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  useEffect(() => {
+    // Track mobile viewport
+    const handleResize = () => {
+      try { setIsMobile(window.innerWidth <= 768); } catch { setIsMobile(false); }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    // Prevent background scroll when mobile chat overlay is open
+    if (isMobile && chatOpen) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [isMobile, chatOpen]);
+
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       const me = data.user ?? null;
@@ -533,7 +553,7 @@ export default function Satsang(): JSX.Element {
               <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, fontSize: 12, opacity: 0.8, alignItems: 'center' }}>
                 <span>Speakers: {speakerCount}</span>
                 <span>Audience: {audienceCount}</span>
-                <button onClick={() => setChatOpen((v) => { try { localStorage.setItem('satsang_chat_open', v ? '0' : '1'); } catch {} return !v; })} style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #333', background: chatOpen ? '#1a1a1a' : '#0e0e0e', color: '#ddd' }}>{chatOpen ? 'Hide Chat' : 'Show Chat'}</button>
+                <button onClick={() => setChatOpen((v) => { try { localStorage.setItem('satsang_chat_open', v ? '0' : '1'); } catch {} return !v; })} style={{ padding: isMobile ? '10px 14px' : '6px 10px', borderRadius: 8, border: '1px solid #333', background: chatOpen ? '#1a1a1a' : '#0e0e0e', color: '#ddd', fontWeight: 600 }}>{chatOpen ? (isMobile ? 'Close' : 'Hide Chat') : 'Chat'}</button>
               </div>
             </div>
             {/* Room header */}
@@ -654,24 +674,27 @@ export default function Satsang(): JSX.Element {
                 </div>
               </div>
               {chatOpen && (
-                <div style={{ width: 420, minWidth: 300, display: 'flex', flexDirection: 'column', borderLeft: '1px solid #222', background: 'rgba(15,15,15,0.6)', backdropFilter:'blur(3px)' }}>
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, padding:'8px 12px', borderBottom:'1px solid #222' }}>
+                <div style={isMobile ? { position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', flexDirection: 'column', background: 'rgba(10,10,10,0.94)', backdropFilter:'blur(6px)' } : { width: 420, minWidth: 300, display: 'flex', flexDirection: 'column', borderLeft: '1px solid #222', background: 'rgba(15,15,15,0.6)', backdropFilter:'blur(3px)' }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, padding: isMobile ? '10px 12px' : '8px 12px', borderBottom:'1px solid #222' }}>
                     <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                      <button onClick={() => { setPaneMode('chat'); try { localStorage.setItem('satsang_pane', 'chat'); } catch {} }} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 10px', borderRadius:8, border:'1px solid #333', background: paneMode==='chat'?'#1a1a1a':'#0e0e0e', color:'#ddd' }}>
+                      <button onClick={() => { setPaneMode('chat'); try { localStorage.setItem('satsang_pane', 'chat'); } catch {} }} style={{ display:'flex', alignItems:'center', gap:6, padding: isMobile ? '8px 12px' : '6px 10px', borderRadius:8, border:'1px solid #333', background: paneMode==='chat'?'#1a1a1a':'#0e0e0e', color:'#ddd', fontWeight: 700 }}>
                         <MessageSquare size={14} /> Chat
                       </button>
-                      <button onClick={async () => { setPaneMode('recordings'); try { localStorage.setItem('satsang_pane', 'recordings'); if (activeRoom) setRecordings(await listRecordings(activeRoom)); } catch {} }} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 10px', borderRadius:8, border:'1px solid #333', background: paneMode==='recordings'?'#1a1a1a':'#0e0e0e', color:'#ddd' }}>
+                      <button onClick={async () => { setPaneMode('recordings'); try { localStorage.setItem('satsang_pane', 'recordings'); if (activeRoom) setRecordings(await listRecordings(activeRoom)); } catch {} }} style={{ display:'flex', alignItems:'center', gap:6, padding: isMobile ? '8px 12px' : '6px 10px', borderRadius:8, border:'1px solid #333', background: paneMode==='recordings'?'#1a1a1a':'#0e0e0e', color:'#ddd', fontWeight: 700 }}>
                         <Library size={14} /> Recordings
                       </button>
                     </div>
+                    {isMobile && (
+                      <button onClick={() => setChatOpen(false)} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #333', background: '#0e0e0e', color: '#ddd', fontWeight: 700 }}>Close ✕</button>
+                    )}
                   </div>
 
                   {paneMode === 'chat' ? (
                     <>
                       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, padding:'8px 12px' }}>
                         {messages.map((m) => (
-                          <div key={m.id} style={{ alignSelf: m.user_id===uid?'flex-end':'flex-start', background: '#1a1a1a', color:'#eee', border: '1px solid #2a2a2a', borderRadius: 12, padding: '8px 10px', maxWidth: '85%', display: 'flex', gap: 8, boxShadow: '0 6px 16px rgba(0,0,0,0.35)' }}>
-                            <img src={avatarMap[m.user_id] || '/ramana.jpg'} alt="avatar" style={{ width: 20, height: 20, borderRadius: '50%', objectFit: 'cover', border: '1px solid #333', marginTop: 2 }} />
+                          <div key={m.id} style={{ alignSelf: m.user_id===uid?'flex-end':'flex-start', background: '#1a1a1a', color:'#eee', border: '1px solid #2a2a2a', borderRadius: 12, padding: isMobile ? '10px 12px' : '8px 10px', maxWidth: isMobile ? '90%' : '85%', display: 'flex', gap: 8, boxShadow: '0 6px 16px rgba(0,0,0,0.35)' }}>
+                            <img src={avatarMap[m.user_id] || '/ramana.jpg'} alt="avatar" style={{ width: isMobile ? 24 : 20, height: isMobile ? 24 : 20, borderRadius: '50%', objectFit: 'cover', border: '1px solid #333', marginTop: 2 }} />
                             <div>
                               <div style={{ fontSize: 12, opacity: 0.7 }}>{nameMap[m.user_id] || (m.user_id === uid ? (myEmailLocal || 'You') : m.user_id.slice(0, 8))} {m.user_id === uid && micEnabled ? '🎤' : ''}</div>
                               <div>{m.content}</div>
@@ -679,7 +702,7 @@ export default function Satsang(): JSX.Element {
                           </div>
                         ))}
                       </div>
-                      <div style={{ display: 'flex', gap: 8, padding: '8px 12px', borderTop: '1px solid #222', position: 'sticky', bottom: 0, background: 'rgba(15,15,15,0.85)', backdropFilter:'blur(4px)' }}>
+                      <div style={{ display: 'flex', gap: 8, padding: isMobile ? '10px 12px' : '8px 12px', borderTop: '1px solid #222', position: 'sticky', bottom: 0, background: 'rgba(15,15,15,0.92)', backdropFilter:'blur(6px)' }}>
                         <input
                           value={input}
                           onChange={(e) => setInput(e.target.value)}
@@ -687,14 +710,14 @@ export default function Satsang(): JSX.Element {
                           placeholder={ended ? 'Chat is closed for this session' : 'Share with Satsang…'}
                           aria-label="Satsang message"
                           disabled={!canSpeak || ended}
-                           inputMode="text"
-                           style={{ flex: 1, padding: '12px 14px', borderRadius: 10, border: '1px solid #333', background: '#1b1b1b', color: '#eee' }}
+                          inputMode="text"
+                          style={{ flex: 1, padding: isMobile ? '14px 16px' : '12px 14px', borderRadius: 10, border: '1px solid #333', background: '#1b1b1b', color: '#eee' }}
                         />
                         <button
                           onClick={() => void handleSend()}
                           disabled={!canSpeak || ended}
-                          style={{ padding: '12px 16px', borderRadius: 10, border: '1px solid #2e7d32', background: '#154a28', color: '#d7ffd9' }}
-                        >➤ Send</button>
+                          style={{ padding: isMobile ? '14px 16px' : '12px 16px', borderRadius: 10, border: '1px solid #2e7d32', background: '#154a28', color: '#d7ffd9', fontWeight: 800 }}
+                        >Send</button>
                       </div>
                     </>
                   ) : (
@@ -705,7 +728,7 @@ export default function Satsang(): JSX.Element {
                         <div key={r.name} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, border:'1px solid #333', background:'#101010', color:'#ddd', borderRadius:10, padding:'8px 10px' }}>
                           <div style={{ display:'flex', alignItems:'center', gap:8, minWidth:0 }}>
                             <PlayCircle size={16} />
-                            <span title={r.name} style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth: 220 }}>{r.name}</span>
+                            <span title={r.name} style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth: isMobile ? 180 : 220 }}>{r.name}</span>
                           </div>
                           <div style={{ display:'flex', gap:8 }}>
                             <audio controls src={r.url} style={{ height: 28 }} />
