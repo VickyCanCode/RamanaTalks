@@ -9,7 +9,10 @@ const RERANK_LAMBDA = 0.7; // trade-off between relevance and diversity for MMR
 const RATE_LIMIT_WINDOW_MS = 15_000; // 15s window
 const RATE_LIMIT_MAX = 5; // 5 requests per window per IP
 const rateLimiter = new Map(); // ip -> { windowStart, count }
-const semanticCache = new Map(); // key -> { response, sourceAttribution, followUpQuestions, topicsDiscussed }
+const semanticCache = new Map(); // key -> { payload, ts }
+const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
+const KB_REV = process.env.KB_REV || null; // bump to invalidate cache on KB updates
+let lastKbRevMemo = KB_REV;
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
@@ -472,18 +475,16 @@ export async function handler(event) {
     const normalizedLang = normalizeLangCode(detectedLanguageCode);
 
     // Semantic cache key
+    // Invalidate cache if KB revision changed
+    if (KB_REV !== lastKbRevMemo) { try { semanticCache.clear(); } catch {} lastKbRevMemo = KB_REV; }
     const cacheKey = `${normalizedLang}::${message.trim().toLowerCase()}`;
     if (semanticCache.has(cacheKey)) {
-      const c = semanticCache.get(cacheKey);
-      return json(200, {
-        response: c.response,
-        conversationId: conversationId || `conv_${Date.now()}`,
-        followUpQuestions: c.followUpQuestions,
-        sourceAttribution: c.sourceAttribution,
-        topicsDiscussed: c.topicsDiscussed,
-        detectedLanguage: normalizedLang,
-        searchStats: { fromCache: true }
-      });
+      const entry = semanticCache.get(cacheKey);
+      if (Date.now() - (entry.ts || 0) < CACHE_TTL_MS) {
+        return json(200, { ...entry.payload, searchStats: { ...(entry.payload.searchStats||{}), fromCache: true } });
+      } else {
+        semanticCache.delete(cacheKey);
+      }
     }
     let relevantChunks = [];
     let questionEmbedding = null;
@@ -566,15 +567,21 @@ export async function handler(event) {
       const greeting = normalizedLang === 'en' ? `Dear ${userName},\n\n` : `${userName} గారూ,\n\n`;
       response = greeting + response;
     }
-    // Enforce 1-2 short quotes with source at top
+    // Do NOT add inline citations/quotes at top. Append sources section at end instead.
+    const langLabel = (code) => {
+      const map = { en: 'Sources', te: 'మూలాలు', hi: 'स्रोत', ta: 'ஆதாரங்கள்', ml: 'മൂലങ്ങൾ', kn: 'ಮೂಲಗಳು', bn: 'উৎস', gu: 'સ્ત્રોતો', mr: 'स्रोत', pa: 'ਸਰੋਤ', or: 'ମୂଳ' };
+      return map[code] || 'Sources';
+    };
+    const uniqueSources = Array.from(new Set((sourceAttribution || []).map((s) => String(s.source || '').trim()).filter(Boolean)));
+    if (uniqueSources.length) {
+      response = `${response}\n\n${langLabel(normalizedLang)}:\n- ${uniqueSources.slice(0,6).join('\n- ')}`;
+    }
+    // Post-process: avoid question restatement at the top
     try {
-      const snippets = (reranked || []).slice(0, 2).map((c) => {
-        const txt = String(c.content || '').replace(/\s+/g, ' ').trim().slice(0, 220);
-        const src = String(c.source || 'source');
-        return `“${txt}” — ${src}`;
-      });
-      if (snippets.length) {
-        response = snippets.join('\n') + '\n\n' + response;
+      const q = message.trim();
+      const r = response.trim();
+      if (r.toLowerCase().startsWith(q.toLowerCase())) {
+        response = r.slice(q.length).trimStart();
       }
     } catch {}
     const followUpQuestions = generateFollowUpQuestions(message, relevantChunks);
@@ -594,7 +601,7 @@ export async function handler(event) {
         embeddingSuccess: !!questionEmbedding
       }
     };
-    try { semanticCache.set(cacheKey, payload); } catch {}
+    try { semanticCache.set(cacheKey, { payload, ts: Date.now() }); } catch {}
     if (doStream) {
       const encoder = new TextEncoder();
       const stream = new ReadableStream({
