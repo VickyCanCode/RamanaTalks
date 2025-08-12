@@ -102,6 +102,8 @@ export default function App(): JSX.Element {
         }
       }
 
+      let finalReply: string | null = null;
+      let effectiveLang: string = (selectedLang !== 'auto' ? selectedLang : lastLang);
       if (streamOn) {
         const res = await fetch(`${apiBase}?stream=1`, {
           method: 'POST',
@@ -113,6 +115,7 @@ export default function App(): JSX.Element {
         const reader = res.body?.getReader();
         const decoder = new TextDecoder();
         let buf = '';
+        let acc = '';
         if (reader) {
           while (true) {
             const { value, done } = await reader.read();
@@ -127,6 +130,7 @@ export default function App(): JSX.Element {
               try {
                 const obj = JSON.parse(payloadStr);
                 if (obj.type === 'chunk' && typeof obj.content === 'string') {
+                  acc += obj.content;
                   setMessages((prev) => {
                     const copy = [...prev];
                     const idx = copy.length - 1;
@@ -149,6 +153,7 @@ export default function App(): JSX.Element {
             }
           }
         }
+        finalReply = acc;
       } else {
         const res = await fetch(apiBase, {
           method: 'POST',
@@ -159,6 +164,7 @@ export default function App(): JSX.Element {
         const reply = (data?.response as string) ?? 'No response';
         const detected = (data?.detectedLanguage as string) || 'en-IN';
         setLastLang(detected);
+        effectiveLang = (selectedLang !== 'auto' ? selectedLang : detected);
         const follow = (data?.followUpQuestions as string[]) || [];
         setSuggested(follow);
         const sources = (data?.sourceAttribution as any[]) || [];
@@ -189,9 +195,10 @@ export default function App(): JSX.Element {
           };
           tick();
         });
+        finalReply = reply;
       }
       if (persist && convId) {
-         const savedId = await saveMessage(convId, 'assistant', reply);
+         const savedId = await saveMessage(convId, 'assistant', finalReply || '');
         if (savedId) {
           setMessages((prev) => {
             const copy = [...prev];
@@ -210,7 +217,7 @@ export default function App(): JSX.Element {
       }
 
       // TTS for assistant reply (optional). Toggle play/pause on repeated press handled in speak().
-       if (voiceOn) speak(reply, selectedLang !== 'auto' ? selectedLang : detected);
+       if (voiceOn && finalReply) speak(finalReply, effectiveLang);
     } catch (e) {
       setMessages((prev) => [...prev, { role: 'assistant', content: 'Error contacting server.' }]);
     } finally {
