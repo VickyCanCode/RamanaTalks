@@ -347,7 +347,7 @@ export default function App(): JSX.Element {
           }}>
             <div style={{ padding: '16px', maxWidth: 1200, width: '100%', margin: '0 auto' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {messages.map((m, idx) => (
+                 {messages.map((m, idx) => (
                   <div key={idx} style={{
                     alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
                     background: '#151515',
@@ -361,7 +361,17 @@ export default function App(): JSX.Element {
                       <span>{m.role === 'user' ? displayName : 'Ramana'}</span>
                       <span style={{ opacity: 0.7 }}>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
+                     <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
+                     {m.role === 'assistant' && Array.isArray((data as any)?.sourceAttribution) ? (
+                       <details style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
+                         <summary>Sources</summary>
+                         <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
+                           {((data as any).sourceAttribution as any[]).slice(0,4).map((s, i) => (
+                             <li key={i} style={{ listStyle: 'disc' }}>{String(s.source || 'source')} — {String(s.category || '')}</li>
+                           ))}
+                         </ul>
+                       </details>
+                     ) : null}
                     {m.role === 'assistant' && (
                       <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                         <button className="btn" onClick={() => {

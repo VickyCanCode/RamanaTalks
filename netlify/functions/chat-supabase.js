@@ -429,8 +429,24 @@ export async function handler(event) {
       // History-aware rewrite and translation for embedding
       const rewritten = await historyAwareRewrite(message, messageHistory, normalizedLang);
       const queryForEmbedding = await maybeTranslateToEnglish(rewritten, normalizedLang);
+      // Query expansion terms (Sanskrit/English duals, titles)
+      const expansions = expandQueryTerms(rewritten);
       questionEmbedding = await generateEmbedding(queryForEmbedding);
       relevantChunks = await searchSupabaseChunks(questionEmbedding, userContext);
+      // If we have expansions, fetch additional by text search and merge
+      if (expansions.length && supabase) {
+        const ors = expansions.map((t)=>`content.ilike.%${t}%`).join(',');
+        const { data: extra } = await supabase
+          .from('knowledge_base')
+          .select('*')
+          .or(ors)
+          .limit(50);
+        if (Array.isArray(extra) && extra.length) {
+          const map = new Map((relevantChunks||[]).map((c)=>[c.id, c]));
+          for (const e of extra) if (!map.has(e.id)) map.set(e.id, e);
+          relevantChunks = Array.from(map.values());
+        }
+      }
     } catch {
       if (!supabase) throw new Error('Supabase client not configured');
       try {
@@ -464,6 +480,19 @@ export async function handler(event) {
     const filtered = (relevantChunks || []).filter((c) => (c.rawSim || c.similarity || 0) >= minSim);
     const reranked = mmrRerank(message, filtered.length ? filtered : (relevantChunks || []), MAX_CHUNKS, RERANK_LAMBDA);
     const { context, sourceAttribution } = buildContext(reranked);
+    // Insufficient context branch
+    if ((reranked || []).length === 0) {
+      const ask = normalizedLang === 'en' ? 'I may not have enough context. Can you clarify your question or mention the source/topic?' : 'పూర్తి సందర్భం లేదు. దయచేసి మీ ప్రశ్నను కొంచెం స్పష్టంగా చెప్పగలరా లేదా సంబంధిత అంశం/గ్రంథం సూచించగలరా?';
+      return json(200, {
+        response: ask,
+        conversationId: conversationId || `conv_${Date.now()}`,
+        followUpQuestions: [],
+        sourceAttribution: [],
+        topicsDiscussed: [],
+        detectedLanguage: normalizedLang,
+        searchStats: { candidatesRetrieved: (relevantChunks||[]).length, chunksSelected: 0 }
+      });
+    }
     const response = await generateGeminiResponse(message, context, messageHistory, userContext, normalizedLang);
     const followUpQuestions = generateFollowUpQuestions(message, relevantChunks);
     const topicsDiscussed = extractTopics(message, relevantChunks);
