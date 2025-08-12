@@ -4,7 +4,7 @@ import { createConversation, saveMessage, submitFeedback, listMessages, updateCo
 import { speak, stopSpeak, setTtsLoadingListener } from './tts';
 import Sidebar from './sidebar';
 
-type ChatMessage = { role: 'user' | 'assistant'; content: string; id?: string; lang?: string };
+type ChatMessage = { role: 'user' | 'assistant'; content: string; id?: string; lang?: string; sources?: Array<{ source?: string; category?: string; importance?: number; tags?: string[] }> };
 
 export default function App(): JSX.Element {
   const persist = (import.meta as any).env?.VITE_PERSIST === 'true';
@@ -112,10 +112,11 @@ export default function App(): JSX.Element {
       setLastLang(detected);
       const follow = (data?.followUpQuestions as string[]) || [];
       setSuggested(follow);
+      const sources = (data?.sourceAttribution as any[]) || [];
       // Typing animation for assistant reply; save to DB after complete
       setIsTyping(true);
       await new Promise<void>((resolve) => {
-        setMessages((prev) => [...prev, { role: 'assistant', content: '', lang: (selectedLang !== 'auto' ? selectedLang : detected) }]);
+        setMessages((prev) => [...prev, { role: 'assistant', content: '', lang: (selectedLang !== 'auto' ? selectedLang : detected), sources }]);
         const step = Math.max(2, Math.floor(reply.length / 240));
         let i = 0;
         const tick = () => {
@@ -362,11 +363,11 @@ export default function App(): JSX.Element {
                       <span style={{ opacity: 0.7 }}>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
                      <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
-                     {m.role === 'assistant' && Array.isArray((data as any)?.sourceAttribution) ? (
+                     {m.role === 'assistant' && Array.isArray(m.sources) && m.sources.length > 0 ? (
                        <details style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
                          <summary>Sources</summary>
                          <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
-                           {((data as any).sourceAttribution as any[]).slice(0,4).map((s, i) => (
+                           {m.sources.slice(0,4).map((s, i) => (
                              <li key={i} style={{ listStyle: 'disc' }}>{String(s.source || 'source')} — {String(s.category || '')}</li>
                            ))}
                          </ul>
