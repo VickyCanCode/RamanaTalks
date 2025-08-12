@@ -1,0 +1,25 @@
+# Node
+node_modules/
+yarn.lock
+package-lock.json
+
+# Vite/Build
+/dist/
+/assets/
+
+# Local env
+.env*
+!.env.example
+
+# Editor/OS
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# TypeScript
+*.tsbuildinfo
+
+# Netlify local state
+.netlify/
+
