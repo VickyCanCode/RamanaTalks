@@ -61,6 +61,11 @@ export default function Podcasts(): JSX.Element {
   }
 
   function buildSources(fileName: string): string[] {
+    // Prefer ASCII-safe alias when present for CDN/device compatibility
+    if (fileName === 'నేను ఎవరు_ రమణ మహర్షి బోధనలు.wav') {
+      return ['/podcast-te.wav', '/%70%6f%64%63%61%73%74%2d%74%65%2e%77%61%76'];
+    }
+
     const raw = '/' + fileName;
     const candidates = new Set<string>();
     try { candidates.add(encodeURI(raw)); } catch {}
