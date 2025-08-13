@@ -33,6 +33,7 @@ export default function Podcasts(): JSX.Element {
   const [currentId, setCurrentId] = useState<string | null>(null);
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const [durations, setDurations] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, boolean>>({});
 
   const bg = useMemo(() => '/aesthetic-background-with-gradient-neon-led-light-effect.jpg', []);
 
@@ -59,6 +60,16 @@ export default function Podcasts(): JSX.Element {
     }
   }
 
+  function buildSources(fileName: string): string[] {
+    const raw = '/' + fileName;
+    const candidates = new Set<string>();
+    try { candidates.add(encodeURI(raw)); } catch {}
+    try { candidates.add(encodeURI(('/' + fileName).normalize('NFC'))); } catch {}
+    try { candidates.add(encodeURI(('/' + fileName).normalize('NFD'))); } catch {}
+    try { candidates.add('/' + encodeURIComponent(fileName)); } catch {}
+    return Array.from(candidates);
+  }
+
   return (
     <div style={{ position: 'relative', minHeight: 'calc(100vh - 48px)', color: '#eee' }}>
       <div aria-hidden style={{ position: 'absolute', inset: 0, backgroundImage: `linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.55)), url(${bg})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }} />
@@ -75,7 +86,7 @@ export default function Podcasts(): JSX.Element {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
             {TRACKS.map((t) => {
-              const src = encodeURI('/' + t.fileName);
+              const sources = buildSources(t.fileName);
               const isActive = currentId === t.id;
               return (
                 <div key={t.id} style={{ padding: 14, borderRadius: 12, border: '1px solid #333', background: '#0f0f0f', color: '#ddd', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -98,15 +109,23 @@ export default function Podcasts(): JSX.Element {
                   <audio
                     ref={(el) => { audioRefs.current[t.id] = el; }}
                     preload="metadata"
-                    src={src}
                     onLoadedMetadata={(e) => {
                       const d = (e.currentTarget as HTMLAudioElement).duration;
                       setDurations((prev) => ({ ...prev, [t.id]: formatTime(d) }));
                     }}
                     onEnded={() => setCurrentId(null)}
+                    onError={() => setErrors((prev) => ({ ...prev, [t.id]: true }))}
                     style={{ width: '100%' }}
                     controls
-                  />
+                    controlsList="nodownload noplaybackrate"
+                  >
+                    {sources.map((s) => (
+                      <source key={s} src={s} type="audio/wav" />
+                    ))}
+                  </audio>
+                  {errors[t.id] ? (
+                    <div style={{ color: '#f88', fontSize: 12 }}>Audio failed to load. If this persists, try reloading the page.</div>
+                  ) : null}
                 </div>
               );
             })}
